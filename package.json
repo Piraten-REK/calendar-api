@@ -1,0 +1,37 @@
+{
+  "name": "calendar-api",
+  "version": "1.0.0",
+  "description": "Calendar API for Nostra Sponte",
+  "main": "bin/app.js",
+  "repository": "git@github.com:Piraten-REK/calendar-api.git",
+  "author": "Mike Kühnapfel <mike.kuehnapfel@piraten-rek.de>",
+  "license": "MIT",
+  "private": true,
+  "devDependencies": {
+    "@types/express": "^4.17.8",
+    "@types/node": "^14.14.2",
+    "ts-standard": "^9.0.0",
+    "typescript": "^4.0.3"
+  },
+  "ts-standard": {
+    "ignore": [
+      "node_modules/**",
+      "bin/**",
+      "**/*.d.ts"
+    ]
+  },
+  "standard": {
+    "ignore": [
+      "**/*.d.ts"
+    ]
+  },
+  "dependencies": {
+    "express": "^4.17.1",
+    "ical.js": "^1.4.0"
+  },
+  "scripts": {
+    "start": "node bin/app.js",
+    "build": "tsc",
+    "watch": "tsc -w"
+  }
+}
