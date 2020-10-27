@@ -28,21 +28,22 @@ export default new class DataHandler {
             .then(data => {
                 that._timezone = data.timezone
 
-                const recur = []
+                const data_: Map<number, Map<number, Month>> = new Map()
+                const recur: RecurrentEvent[] = []
 
                 for (const event of data.events) {
                     if (typeof event === 'object') {
                         that.whichMonths(event).forEach(month => {
-                            if (!that.data.has(month[0])) that.data.set(month[0], new Map())
-                            if (!that.data.get(month[0])!.has(month[1])) that.data.get(month[0])!.set(month[1], new Month(month[0], month[1], [], that._timezone!))
-                            else that.data.get(month[0])!.get(month[1])!.reset()
-                            that.data.get(month[0])!.get(month[1])!.addEvent(event)
+                            if (!data_.has(month[0])) data_.set(month[0], new Map())
+                            if (!data_.get(month[0])!.has(month[1])) data_.get(month[0])!.set(month[1], new Month(month[0], month[1], [], that._timezone!))
+                            data_.get(month[0])!.get(month[1])!.addEvent(event)
                         })
                     } else {
                         recur.push(event)
                     }
                 }
 
+                that.data = data_
                 that.recur = recur
 
                 that._lastModified = new Date()
@@ -82,7 +83,7 @@ export default new class DataHandler {
             r.push([y, m] as [number, number])
         }
 
-        return r
+        return r.filter((val, id, self) => self.indexOf(val) === id)
     }
 
     getMonth (year: number, month: number): Object {
