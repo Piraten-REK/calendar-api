@@ -10,6 +10,16 @@ const json: [string, string] = ['Content-Type', 'application/json; charset=utf-8
 
 router.use((req, res, next) => {
   res.set('Allow', 'GET, HEAD')
+  switch (req.header('Origin')) {
+    case 'https://piraten-rek.de':
+      res.set('Access-Control-Allow-Origin', 'https://piraten-rek.de').set('Vary', 'Origin')
+      break
+    case 'https://piratenpartei-rhein-erft.de':
+      res.set('Access-Control-Allow-Origin', 'https://piratenpartei-rhein-erft.de').set('Vary', 'Origin')
+      break
+    default:
+      res.set('Vary', 'Origin')
+  }
   next()
 })
 
