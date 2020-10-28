@@ -54,6 +54,8 @@ export default new class DataHandler {
     }
 
     private whichMonths (event: Event): [number, number][] {
+        if (event.start.year === event.end.year && event.start.month === event.end.month) return [[event.start.year, event.start.month]]
+
         const r = [
             [event.start.year, event.start.month] as [number, number],
             [event.end.year, event.end.month] as [number, number]
