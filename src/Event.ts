@@ -17,6 +17,7 @@ export class Event {
     this.location = location
     this.start = start
     this.end = end
+    if (this.end.isDate) this.end.adjust(-1, 0, 0, 0, 0)
   }
 
   toJSON(): Object {
