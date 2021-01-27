@@ -18,7 +18,8 @@ router.use((req, res, next) => {
       res.set('Access-Control-Allow-Origin', 'https://piratenpartei-rhein-erft.de').set('Vary', 'Origin')
       break
     default:
-      res.set('Vary', 'Origin')
+      res.set('Access-Control-Allow-Origin', '*')
+      // res.set('Vary', 'Origin')
   }
   next()
 })
