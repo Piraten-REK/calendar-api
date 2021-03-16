@@ -1,58 +1,60 @@
 import * as ICAL from 'ical.js'
 import Month from './Month'
-import { default as getNewData, subtractDates } from './ical'
+import { default as getNewData } from './ical'
 import { Event, RecurrentEvent } from './Event'
 import { setInterval } from 'timers'
 
+/** Datahandler singleton */
 export default new class DataHandler {
+    /** Map of Months indexed by year and month */
     private data: Map<number, Map<number, Month>> = new Map()
+    /** Array of all Recurrent Events in data source */
     private recur: RecurrentEvent[] = []
-
+    /** Timezone for all data */
     private _timezone: ICAL.Timezone|null = null
+    /** Timezone for all data */
     public get timezone(): ICAL.Timezone|null {
         return this._timezone ? new ICAL.Timezone(this._timezone.component) : null
     }
 
+    /** Date on which the data was last updated */
     private _lastModified: Date = new Date(0)
+    /** Date on which the data was last updated */
     public get lastModified(): Date {
         return new Date(this._lastModified)
     }
 
     constructor () {
         this.pullData()
-        setInterval(this.pullData, 10 * 60 * 1e3, this)
+        setInterval(() => this.pullData.call(this), 10 * 60 * 1e3)
     }
 
-    private pullData (that: DataHandler = this) {
-        getNewData()
-            .then(data => {
-                that._timezone = data.timezone
-
-                const data_: Map<number, Map<number, Month>> = new Map()
-                const recur: RecurrentEvent[] = []
-
-                for (const event of data.events) {
-                    if (typeof event === 'object') {
-                        that.whichMonths(event).forEach(month => {
-                            if (!data_.has(month[0])) data_.set(month[0], new Map())
-                            if (!data_.get(month[0])!.has(month[1])) data_.get(month[0])!.set(month[1], new Month(month[0], month[1], [], that._timezone!))
-                            data_.get(month[0])!.get(month[1])!.addEvent(event)
-                        })
-                    } else {
-                        recur.push(event)
-                    }
+    /**
+     * Retrieves new data from the data source
+     */
+    private pullData () {
+        getNewData().then(({singleEvents, recurrentEvents, timezone}) => {
+            for (const event of singleEvents) {
+                for (const [year, month] of this.whichMonths(event)) {
+                    if (!this.data.has(year)) this.data.set(year, new Map())
+                    if (!this.data.get(year)!.has(month)) this.data.get(year)!.set(month, new Month(year, month, [], timezone))
+                    this.data.get(year)!.get(month)!.addEvent(event)
                 }
+            }
 
-                that.data = data_
-                that.recur = recur
+            this.recur = recurrentEvents
 
-                that._lastModified = new Date()
-                console.log('[%s] Data pulled', that._lastModified.toUTCString())
-            })
-            .catch(e => { console.error('[%s] Unable to fetch data\n', (new Date).toUTCString()); console.log(e) })
-        
+            this._timezone = timezone
+            this._lastModified = new Date()
+
+            console.log('[%s] Data pulled', this._lastModified.toUTCString())
+        }).catch(e => { console.error('[%s] Unable to fetch data\n', (new Date).toUTCString()); console.error(e) })
     }
 
+    /**
+     * Returns an Array of months the given Event affects as number tupels representing year and month
+     * @param event The Event to check for
+     */
     private whichMonths (event: Event): [number, number][] {
         if (event.start.year === event.end.year && event.start.month === event.end.month) return [[event.start.year, event.start.month]]
 
@@ -88,12 +90,23 @@ export default new class DataHandler {
         return r.filter((val, id, self) => self.indexOf(val) === id)
     }
 
+    /**
+     * Returns an Array of all Events of the given month as plain JavaScript objects to be returned in the REST API as JSON
+     * @param year Number of year
+     * @param month Number of month
+     */
     getMonth (year: number, month: number): Object {
         if (!this.data.has(year)) this.data.set(year, new Map())
         if (!this.data.get(year)!.has(month)) this.data.get(year)!.set(month, new Month(year, month, [], this._timezone!))
         return this.data.get(year)!.get(month)!.toJSON(this.recur)
     }
 
+    /**
+     * Returns an Array of all Events of the given day as plain JavaScript objects to be returned in the REST API as JSON
+     * @param year Number of year
+     * @param month Number of month
+     * @param day Number of day
+     */
     getDay (year: number, month: number, day: number): Object {
         if (!this.data.has(year)) this.data.set(year, new Map())
         if (!this.data.get(year)!.has(month)) this.data.get(year)!.set(month, new Month(year, month, [], this._timezone!))

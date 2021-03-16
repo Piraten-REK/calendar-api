@@ -2,6 +2,8 @@ import express from 'express'
 import signet from './signet'
 import { Time } from 'ical.js'
 import dataHandler from './dataHandler'
+import Month from './Month'
+import { Event } from './Event'
 
 const router = express.Router()
 
