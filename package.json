@@ -1,6 +1,6 @@
 {
   "name": "calendar-api",
-  "version": "1.0.0",
+  "version": "2.0.0_beta",
   "description": "Calendar API for Nostra Sponte",
   "main": "bin/app.js",
   "repository": "git@github.com:Piraten-REK/calendar-api.git",
@@ -8,10 +8,10 @@
   "license": "MIT",
   "private": true,
   "devDependencies": {
-    "@types/express": "^4.17.8",
-    "@types/node": "^14.14.2",
-    "ts-standard": "^9.0.0",
-    "typescript": "^4.0.3"
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.10.4",
+    "ts-standard": "^12.0.2",
+    "typescript": "^5.3.3"
   },
   "ts-standard": {
     "ignore": [
@@ -26,8 +26,8 @@
     ]
   },
   "dependencies": {
-    "express": "^4.17.1",
-    "ical.js": "^1.4.0"
+    "express": "^4.18.2",
+    "ical.js": "^1.5.0"
   },
   "scripts": {
     "start": "node bin/app.js",

@@ -1,7 +1,6 @@
 import * as ICAL from 'ical.js'
 import { get } from 'https'
-import { RecurrentEvent, Event } from './Event'
-import Month from './Month'
+import { Event, RecurringEvent } from './Event'
 
 /** Data source for iCAL data */
 const dataSource = 'https://cloud.piraten-rek.de/remote.php/dav/public-calendars/CRowRieFfHH8cqDy?export'
@@ -12,14 +11,21 @@ const dataSource = 'https://cloud.piraten-rek.de/remote.php/dav/public-calendars
  * @param headers HTTP headers, default `{}`
  * @returns Promise of data as a string
  */
-export function getRequest (url: string, headers: {} = {}): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
-    get(url, { headers: headers }, res => {
+export async function getRequest (url: string, headers: Record<string, string> = {}): Promise<string> {
+  return await new Promise<string>((resolve, reject) => {
+    get(url, { headers }, res => {
       let data = ''
-      res.on('data', chunk => { data += chunk })
-      res.on('end', () => resolve(data) )
+      res.on('data', (chunk: string) => {
+        data += chunk
+      })
+      res.on('end', () => resolve(data))
     }).on('error', err => reject(err))
   })
+}
+
+export interface FetchedEvents {
+  events: ICAL.Event[]
+  timezone: ICAL.Timezone
 }
 
 /**
@@ -27,45 +33,40 @@ export function getRequest (url: string, headers: {} = {}): Promise<string> {
  * @param input raw string of iCal data
  * @returns Array of ICAL.Events and Timezone
  */
-export function extractEvents (input: string): Promise<{events: ICAL.Event[]; timezone: ICAL.Timezone;}> {
-  return new Promise((resolve, reject) => {
+export async function extractEvents (input: string): Promise<FetchedEvents> {
+  return await new Promise((resolve, reject) => {
     try {
       const data = ICAL.parse(input)
-      const comp = new ICAL.Component(data)
-      const result = comp.getAllSubcomponents('vevent').map(event => new ICAL.Event(event))
+      const component = new ICAL.Component(data)
+      const events = component.getAllSubcomponents('vevent').map(event => new ICAL.Event(event))
       resolve({
-        events: result,
-        timezone: new ICAL.Timezone(comp.getFirstSubcomponent('vtimezone') as ICAL.Component)
-      })
-    } catch (e) {
-      reject(e)
+        events,
+        timezone: new ICAL.Timezone(component.getFirstSubcomponent('vtimezone') as ICAL.Component)
+      } satisfies FetchedEvents)
+    } catch (error) {
+      reject(error)
     }
   })
 }
 
-/**
- * Retrieves new data from the data source
- * @returns Events and Timezone
- */
-export default function getNewData (): Promise<{ singleEvents: Event[]; recurrentEvents: RecurrentEvent[]; timezone: ICAL.Timezone; }> {
-  return getRequest(dataSource)                                             // Get raw data from data source
-    .then(r => extractEvents(r))                                            // Extract raw data into ICAL.Events
-    .then(({ events, timezone }) => convertEvents(events, timezone))        // Converts an ICAL.Event to an Events
+export interface ConvertedEvents {
+  singleEvents: Event[]
+  recurringEvents: RecurringEvent[]
+  timezone: ICAL.Timezone
 }
 
 /**
- * Converts an ICAL.Event to an Events
+ * Converts an array of ICAL.Event to Events
  * @param events Event to be converted
  * @param timezone Timezone to test for
  */
-function convertEvents (events: ICAL.Event[], timezone: ICAL.Timezone): Promise<{ singleEvents: Event[], recurrentEvents: RecurrentEvent[], timezone: ICAL.Timezone }> {
-  return new Promise(resolve => {
+export async function convertEvents (events: ICAL.Event[], timezone: ICAL.Timezone): Promise<ConvertedEvents> {
+  return await new Promise(resolve => {
     const singleEvents: Event[] = []
-    const recurrentEvents: RecurrentEvent[] = []
+    const recurringEvents: RecurringEvent[] = []
 
-    for (const event of events) {
+    for (let idx = 0, event = events[0]; idx < events.length; event = events[++idx]) {
       if (!event.isRecurring()) {
-        // Single Event
         singleEvents.push(new Event(
           event.summary,
           event.description,
@@ -74,46 +75,49 @@ function convertEvents (events: ICAL.Event[], timezone: ICAL.Timezone): Promise<
           event.endDate
         ))
       } else {
-        const e: RecurrentEvent = (month: Month): Event[] => {
-          const r: Event[] = []
+        const recurringEvent: RecurringEvent = (month) => {
+          const events: Event[] = []
           const iterator = event.iterator(month.firstVisible)
-  
-          let val: ICAL.Time
-          while ((val = iterator.next()) && month.lastVisible.compareDateOnlyTz(val, month.timezone) >= 0) {
-            if (val.compareDateOnlyTz(event.startDate, month.timezone) === -1) continue
-  
-            const e = new Event(
+
+          let date = iterator.next()
+          while (date != null && month.lastVisible.compareDateOnlyTz(date, month.timezone) >= 0) {
+            if (date.compareDateOnlyTz(event.startDate, month.timezone) === -1) {
+              date = iterator.next()
+              continue
+            }
+
+            const newEvent = new Event(
               event.summary,
               event.description,
               event.location,
               event.startDate.clone(),
               event.endDate.clone()
             )
-            const diff = subtractDates(val, event.startDate)
-            e.start.addDuration(diff)
-            e.end.addDuration(diff)
-            r.push(e)
+            const diff = subtractDates(date, event.startDate)
+            newEvent.start.addDuration(diff)
+            newEvent.end.addDuration(diff)
+
+            events.push(newEvent)
           }
-  
-          return r
+
+          return events
         }
-        recurrentEvents.push(e)
+
+        recurringEvents.push(recurringEvent)
       }
     }
 
     resolve({
-      singleEvents: singleEvents,
-      recurrentEvents: recurrentEvents,
-      timezone: timezone
+      singleEvents,
+      recurringEvents,
+      timezone
     })
   })
 }
 
 /** Substracts bDate from aDate */
-export function subtractDates(aDate: ICAL.Time, bDate: ICAL.Time): ICAL.Duration {
-  const [ a, b ] = [ aDate.isDate, bDate.isDate ]
-
-  if (a && !b) {
+export function subtractDates (aDate: ICAL.Time, bDate: ICAL.Time): ICAL.Duration {
+  if (aDate.isDate && !bDate.isDate) {
     aDate = new ICAL.Time({
       year: aDate.year,
       month: aDate.month,
@@ -123,7 +127,7 @@ export function subtractDates(aDate: ICAL.Time, bDate: ICAL.Time): ICAL.Duration
       second: bDate.second,
       isDate: false
     }, aDate.zone)
-  } else if (b && !a) {
+  } else if (!aDate.isDate && bDate.isDate) {
     bDate = new ICAL.Time({
       year: bDate.year,
       month: bDate.month,
@@ -134,5 +138,16 @@ export function subtractDates(aDate: ICAL.Time, bDate: ICAL.Time): ICAL.Duration
       isDate: false
     }, bDate.zone)
   }
+
   return aDate.subtractDate(bDate)
+}
+
+/**
+ * Retrieves new data from the data source
+ * @returns Events and Timezone
+ */
+export default async function getNewData (): Promise<ConvertedEvents> {
+  return await getRequest(dataSource)
+    .then(async icalResponse => await extractEvents(icalResponse))
+    .then(async ({ events, timezone }) => await convertEvents(events, timezone))
 }
