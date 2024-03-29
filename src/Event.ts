@@ -1,12 +1,13 @@
-import { Time } from 'ical.js'
-import Month from './Month'
+import ICAL from 'ical.js'
+import type Month from './Month.js'
 
-/** 
- * Class Event
- * 
+/**
+ * @class Event
  * Represents a single event
+ *
+ * @since 1.0.0
  */
-export class Event {
+export default class Event {
   /** Event title */
   public readonly title: string
   /** Event description */
@@ -14,33 +15,28 @@ export class Event {
   /** Event location */
   public readonly location: string
   /** Event start time */
-  public readonly start: Time
+  public readonly start: ICAL.Time
   /** Event end time */
-  public readonly end: Time
-  /** True if event is all day long */
-  get dayLong(): boolean {
-    return this.start.icaltype === 'date' && this.end.icaltype === 'date'
-  }
+  public readonly end: ICAL.Time
 
-  /**
-   * Constructor for Event
-   * @param title Event title
-   * @param description Event description
-   * @param location Event location
-   * @param start Event start time
-   * @param end Event end time
-   */
-  constructor(title: string, description: string, location: string, start: Time, end: Time) {
+  constructor (title: string, description: string, location: string, start: ICAL.Time, end: ICAL.Time) {
     this.title = title
     this.description = description
     this.location = location
     this.start = start
     this.end = end
-    if (this.end.isDate) this.end.adjust(-1, 0, 0, 0, 0)
+    if (this.end.isDate) {
+      this.end.adjust(-1, 0, 0, 0, 0)
+    }
   }
 
-  /** Returns a plain JavaSCript Object for use in the REST-API as JSON */
-  toJSON(): Object {
+  /** True if event is all day long */
+  get dayLong (): boolean {
+    return this.start.icaltype === 'date' &&
+      this.end.icaltype === 'date'
+  }
+
+  toJSONObject (): Record<'title' | 'description' | 'location' | 'start' | 'end', string> {
     return {
       title: this.title,
       description: this.description,
@@ -49,19 +45,24 @@ export class Event {
       end: this.end.toString()
     }
   }
+
+  /**
+   * Checks whether the Event affects a given date.
+   * @param date Date to be checked for
+   * @param timezone Timezone to be cheked in
+   *
+   * @since 2.0.0
+   */
+  affetcsDate (date: ICAL.Time, timezone: ICAL.Timezone): boolean {
+    return this.start.compareDateOnlyTz(date, timezone) <= 0 &&
+      this.end.compareDateOnlyTz(date, timezone) >= 0
+  }
 }
 
 /**
- * Type RecurrentEvent
- * 
  * A recurring event
- * Factory of Events
+ * Factory of {@link Event Events}
  */
-export type RecurrentEvent = (month: Month) => Event[]
+export type RecurringEvent = (month: Month) => Event[]
 
-/**
- * Type AnyEvent
- * 
- * Single or recurring Event
- */
-export type AnyEvent = Event|RecurrentEvent
+export type AnyEvent = Event | RecurringEvent
