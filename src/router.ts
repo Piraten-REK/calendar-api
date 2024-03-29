@@ -1,63 +1,145 @@
 import express from 'express'
-import signet from './signet'
-import { Time } from 'ical.js'
-import dataHandler from './dataHandler'
-import Month from './Month'
-import { Event } from './Event'
+import ICAL from 'ical.js'
+import dataHandler from './dataHandler.js'
+import { z } from 'zod'
+import fs from 'fs'
+import path from 'path'
 
-const router = express.Router()
+const yearMonthSchema = z.object({
+  year: z.string()
+    .transform(str => parseInt(str))
+    .pipe(
+      z.number()
+        .int('year must be an integer')
+        .min(2010, 'year must be between 2010 and 2100 (inclusive)')
+        .max(2100, 'year must be between 2010 and 2100 (inclusive)')
+    ),
+  month: z.string()
+    .transform(str => parseInt(str))
+    .pipe(
+      z.number()
+        .int('month must be an integer')
+        .min(1, 'month must be between 1 and 12 (inclusive)')
+        .max(12, 'month must be between 1 and 12 (inclusive)')
+    )
+})
+const yearMonthDaySchema = yearMonthSchema.extend({
+  day: z.string()
+    .transform(str => parseInt(str))
+    .pipe(
+      z.number()
+        .int('int must be an integer')
+        .min(1, 'day must be at least 1')
+    )
+}).refine(
+  ({ year, month, day }) => day <= ICAL.Time.daysInMonth(month, year),
+  {
+    message: 'day cannot be greater than there are days in the given month'
+  }
+)
 
-const text: [string, string] = ['Content-Type', 'text/plain']
-const json: [string, string] = ['Content-Type', 'application/json; charset=utf-8']
+const signet = fs.readFileSync(
+  path.resolve('public/logo.txt')
+).toString()
+
+const favicon = fs.readFileSync(
+  path.resolve('public/favicon.ico')
+)
+
+const router: express.Router = express.Router()
+
+const contentTypes = {
+  text: ['Content-Type', 'text/plain'],
+  json: ['Content-Type', 'application/json; charset=utf-8'],
+  problem: ['Content-Type', 'application/problem+json; charset=utf-8'],
+  icon: ['Content-Type', 'image/x-icon']
+} as const
 
 router.use((req, res, next) => {
-  res.set('Allow', 'GET, HEAD')
+  res.set('Allow', 'GET, HEAD, OPTIONS')
+  res.set('X-Calender-API', '2')
   switch (req.header('Origin')) {
     case 'https://piraten-rek.de':
-      res.set('Access-Control-Allow-Origin', 'https://piraten-rek.de').set('Vary', 'Origin')
+      res.set('Access-Control-Allow-Origin', 'https://piraten-rek.de')
+        .set('Vary', 'Origin')
       break
     case 'https://piratenpartei-rhein-erft.de':
-      res.set('Access-Control-Allow-Origin', 'https://piratenpartei-rhein-erft.de').set('Vary', 'Origin')
+      res.set('Access-Control-Allow-Origin', 'https://piratenpartei-rhein-erft.de')
+        .set('Vary', 'Origin')
       break
     default:
       res.set('Access-Control-Allow-Origin', '*')
-      // res.set('Vary', 'Origin')
+        .set('Vary', 'Origin')
   }
   next()
 })
 
-router.get('/', (req, res) => res.status(200).set(...text).send(signet))
+router.get('/', (_, res) => res.status(200).set(...contentTypes.text).send(signet))
+
+router.get('/favicon.ico', (_, res) => res.status(200).set(...contentTypes.icon).send(favicon))
 
 router.get('/:year/:month', (req, res) => {
-  const [ year, month ] = [
-    req.params.year,
-    req.params.month
-  ].map(it => parseInt(it))
-  
-  if ([ year, month ].some(it => isNaN(it))) res.status(400).set(...text).send('Invalid data in URI')
-  else if (year < 1970 || year > 2100) res.status(400).set(...text).send('`year` must be between 1970 and 2100')
-  else if (month < 1 || month > 12) res.status(400).set(...text).send('`month` must be between 1 and 12')
-  else res.status(200).set(...json).set('Last-Modified', dataHandler.lastModified.toUTCString()).json(dataHandler.getMonth(year, month))
+  const parsed = yearMonthSchema.safeParse(req.params)
+
+  if (!parsed.success) {
+    const errors = parsed.error.flatten()
+    return res.status(400)
+      .header(...contentTypes.problem)
+      .header('Content-Language', 'en')
+      .json({
+        type: 'https://calendar.piraten-rek.de/err/validation',
+        title: 'Your request parameters didn\'t validate',
+        'invalid-params': errors.fieldErrors
+      })
+  }
+
+  const { year, month } = parsed.data
+
+  res.status(200)
+    .header(...contentTypes.json)
+    .set('Last-Modified', dataHandler.lastModified.toUTCString())
+    .json(dataHandler.getMonth(year, month))
 })
 
 router.get('/:year/:month/:day', (req, res) => {
-  const [ year, month, day ] = [
-    req.params.year,
-    req.params.month,
-    req.params.day
-  ].map(it => parseInt(it))
-  
-  if ([ year, month ].some(it => isNaN(it))) res.status(400).set(...text).send('Invalid data in URI')
-  else if (year < 1970 || year > 2100) res.status(400).set(...text).send('`year` must be between 1970 and 2100')
-  else if (month < 1 || month > 12) res.status(400).set(...text).send('`month` must be between 1 and 12')
-  else if (day < 1 || day > Time.daysInMonth(month, year)) res.status(400).set(...text).send('`day` must be between 1 and ' + Time.daysInMonth(month, year).toString())
-  else res.status(200).set(...json).set('Last-Modified', dataHandler.lastModified.toUTCString()).json(dataHandler.getDay(year, month, day))
+  const parsed = yearMonthDaySchema.safeParse(req.params)
+
+  if (!parsed.success) {
+    const errors = parsed.error.flatten()
+    return res.status(400)
+      .header(...contentTypes.problem)
+      .header('Content-Language', 'en')
+      .json({
+        type: 'https://calendar.piraten-rek.de/err/validation',
+        title: 'Your request parameters didn\'t validate',
+        'invalid-params': errors.fieldErrors
+      })
+  }
+
+  const { year, month, day } = parsed.data
+
+  res.status(200)
+    .header(...contentTypes.json)
+    .set('Last-Modified', dataHandler.lastModified.toUTCString())
+    .json(dataHandler.getDay(year, month, day))
 })
 
 router.use((req, res) => {
-  if (req.method.toUpperCase() === 'HEAD') res.status(404).set(...text).end()
-  else if (req.method.toUpperCase() === 'GET') res.status(404).set(...text).end('Not Found')
-  else res.status(405).set(...text).end('Method Not Allowed')
+  if (req.method.toUpperCase() === 'HEAD' || req.method.toUpperCase() === 'OPTIONS') {
+    return res.status(404).set(...contentTypes.problem).end()
+  }
+  if (req.method.toUpperCase() === 'GET') {
+    return res.status(404).set(...contentTypes.problem).json({
+      type: 'https://calendar.piraten-rek.de/err/not-found',
+      title: 'Not found',
+      detail: `There is nothing to be found at "${req.path}"`
+    })
+  }
+  res.status(405).set(...contentTypes.problem).json({
+    type: 'https://calendar.piraten-rek.de/err/method-not-allowed',
+    title: 'Method Not Allowed',
+    detail: 'The only allowed methods are GET, HEAD and OPTIONS'
+  })
 })
 
 export default router
