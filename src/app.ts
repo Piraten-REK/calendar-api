@@ -1,11 +1,13 @@
 import express from 'express'
-import router from './router'
-import dataHandler from './dataHandler'
+import router from './router.js'
+import { z } from 'zod'
 
 const app = express()
-const port = 3000
-
-dataHandler
+const { CALENDAR_PORT: port } = z.object({
+  CALENDAR_PORT: z.string().transform(str => parseInt(str))
+    .pipe(z.number().int().min(0).max(65535))
+    .default('3000')
+}).parse(process.env)
 
 app.disable('x-powered-by')
 
