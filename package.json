@@ -32,10 +32,11 @@
   },
   "dependencies": {
     "express": "^4.21.1",
-    "ical.js": "^2.1.0"
+    "ical.js": "^2.1.0",
+    "zod": "^3.23.8"
   },
   "scripts": {
-    "start": "node dist/app.js",
+    "start": "if [ ! -f '.env' ]; then cp .env.sample .env; fi; node dist/app.js",
     "build": "rollup -c",
     "dev": "ENVIRONMENT=DEVELOPMENT rollup -c --watch"
   },
