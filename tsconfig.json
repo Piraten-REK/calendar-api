@@ -1,3 +1,8 @@
 {
-  "extends": "@tsconfig/node-lts/tsconfig.json"
+  "extends": "@tsconfig/node-lts/tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "ical.js": ["./node_modules/ical.js"]
+    }
+  }
 }

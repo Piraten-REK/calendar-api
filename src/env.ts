@@ -7,7 +7,8 @@ export const envSchema = z.object({
   PORT: z.string()
     .transform(port => Number.parseInt(port)).pipe(
       z.number().int().min(0).max(65535)
-    )
+    ),
+  ICAL_URL: z.string().url()
 }).passthrough()
 
 export default envSchema.parse(process.env)
