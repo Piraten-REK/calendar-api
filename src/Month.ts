@@ -64,8 +64,4 @@ export default class Month implements IMonth, ReturnedByApi<MonthJsonable> {
       events: this.events.map(event => event.toPlainObject())
     }
   }
-
-  toJson (space?: number | string): string {
-    return JSON.stringify(this.toPlainObject(), null, space)
-  }
 }

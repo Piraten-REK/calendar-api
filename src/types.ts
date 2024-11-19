@@ -15,5 +15,12 @@ export type RecurringEvent = (month: Month) => Generator<Event>
 
 export interface ReturnedByApi <Jsonable extends Object> {
   toPlainObject: () => Jsonable
-  toJson: (space?: string | number) => string
 }
+
+export type ProblemObj <Additional extends Record<string, unknown> = {}> = {
+  status: number
+  type?: string
+  title?: string
+  detail?: string
+  instance?: string
+} & Additional
