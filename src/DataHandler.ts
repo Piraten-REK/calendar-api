@@ -8,14 +8,23 @@ import { mapGetOrSet } from './helpers.js'
 import type Day from './Day.js'
 
 export default class DataHandler {
-  timezone: ICAL.Timezone | null
+  timezone: ICAL.Timezone | null = null
   events: Event[] = []
   recurringEvents: RecurringEvent[] = []
   #lastUpdate: Date = new Date(0)
   #iterator: NodeJS.Timeout | null = null
   months = new Map<number, Map<MonthInt, Month>>()
+  eventMap = new Map<string, Event[]>()
+
+  static #instance: DataHandler | null = null
 
   constructor (timezone?: ICAL.Timezone) {
+    if (DataHandler.#instance != null) {
+      return DataHandler.#instance
+    }
+
+    DataHandler.#instance = this
+
     this.timezone = timezone ?? null
 
     void this.fetch()
@@ -65,8 +74,6 @@ export default class DataHandler {
 
     const [events, timezone] = await this.#getEvents()
 
-    console.log('STATIC', events.find(event => event.uid === '4e1f53ca-7a12-48c1-b5b8-a147bae3f404'))
-
     const singleEvents: Event[] = []
     const recurringEvents: RecurringEvent[] = []
 
@@ -84,8 +91,6 @@ export default class DataHandler {
             if (val.compareDateOnlyTz(event.startDate as any, this.timezone as ICAL.Timezone) === -1) {
               continue
             }
-
-            console.log('RECUR', events.find(event => event.uid === '4e1f53ca-7a12-48c1-b5b8-a147bae3f404'))
 
             yield Event.createWithDiff(event, val)
 
@@ -107,8 +112,11 @@ export default class DataHandler {
   }
 
   getMonth (year: number, month: MonthInt): Month {
+    console.log('hey')
+    const yearMap = mapGetOrSet(this.months, year, () => new Map<MonthInt, Month>())
+    console.log(yearMap)
     return mapGetOrSet(
-      mapGetOrSet(this.months, year, () => new Map<MonthInt, Month>()),
+      yearMap,
       month,
       () => new Month(year, month, this)
     )
