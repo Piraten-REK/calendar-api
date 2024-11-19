@@ -57740,12 +57740,12 @@ class Event {
         this.title = event.summary;
         this.description = event.description;
         this.location = event.location;
-        this.start = event.startDate;
-        this.end = event.endDate;
+        this.start = event.startDate.clone();
+        this.end = event.endDate.clone();
     }
     static createWithDiff(icalEvent, relativeTo) {
         const event = new Event(icalEvent);
-        let a = relativeTo;
+        let a = relativeTo.clone();
         let b = icalEvent.startDate;
         if (a.isDate && !b.isDate) {
             a = new ICALmodule.Time({
@@ -57828,6 +57828,22 @@ function mapGetOrSet(map, key, setter) {
     }
     return map.get(key);
 }
+function sendProblem(res, problem) {
+    res
+        .status(problem.status)
+        .setHeader('Content-Type', 'application/problem+json; charset=utf-8')
+        .json(problem);
+}
+function sendZodError(res, error) {
+    const [detail] = Object.values(error.flatten())
+        .flat()
+        .filter(it => it != null && typeof it === 'string');
+    sendProblem(res, {
+        status: 400,
+        title: error.message,
+        detail
+    });
+}
 
 // @ts-expect-error
 class Month {
@@ -57873,19 +57889,22 @@ class Month {
             events: this.events.map(event => event.toPlainObject())
         };
     }
-    toJson(space) {
-        return JSON.stringify(this.toPlainObject(), null, space);
-    }
 }
 
 class DataHandler {
-    timezone;
+    timezone = null;
     events = [];
     recurringEvents = [];
     #lastUpdate = new Date(0);
     #iterator = null;
     months = new Map();
+    eventMap = new Map();
+    static #instance = null;
     constructor(timezone) {
+        if (DataHandler.#instance != null) {
+            return DataHandler.#instance;
+        }
+        DataHandler.#instance = this;
         this.timezone = timezone ?? null;
         void this.fetch();
     }
@@ -57928,7 +57947,6 @@ class DataHandler {
             this.#iterator = null;
         }
         const [events, timezone] = await this.#getEvents();
-        console.log('STATIC', events.find(event => event.uid === '4e1f53ca-7a12-48c1-b5b8-a147bae3f404'));
         const singleEvents = [];
         const recurringEvents = [];
         for (let idx = 0, event = events[0]; idx < events.length; event = events[++idx]) {
@@ -57943,7 +57961,6 @@ class DataHandler {
                         if (val.compareDateOnlyTz(event.startDate, this.timezone) === -1) {
                             continue;
                         }
-                        console.log('RECUR', events.find(event => event.uid === '4e1f53ca-7a12-48c1-b5b8-a147bae3f404'));
                         yield Event.createWithDiff(event, val);
                         val = iterator.next();
                     }
@@ -57960,23 +57977,132 @@ class DataHandler {
         }, 600000);
     }
     getMonth(year, month) {
-        return mapGetOrSet(mapGetOrSet(this.months, year, () => new Map()), month, () => new Month(year, month, this));
+        console.log('hey');
+        const yearMap = mapGetOrSet(this.months, year, () => new Map());
+        console.log(yearMap);
+        return mapGetOrSet(yearMap, month, () => new Month(year, month, this));
     }
     getDay(year, month, day) {
         return this.getMonth(year, month).getDay(day);
     }
 }
 
+const uid = z.string().uuid();
+const year = z.string()
+    .transform(str => parseInt(str))
+    .pipe(z.number().int().min(1970).max(2100));
+const month = z.string()
+    .transform(str => parseInt(str))
+    .pipe(z.number().int().min(1).max(12))
+    .transform(it => it);
+// --- v1 ------
+const v1Month = z.object({
+    year,
+    month
+});
+const v1Day = z.object({
+    year,
+    month,
+    day: z.string()
+        .transform(str => parseInt(str))
+        .pipe(z.number().int().min(1))
+}).refine(({ year, month, day }) => day <= ICALmodule.Time.daysInMonth(month, year));
+// --- v2 ------
+z.object({
+    id: uid
+});
+z.object({
+    year,
+    id: uid
+});
+z.object({
+    year,
+    month,
+    id: uid
+});
+z.object({
+    year,
+    month,
+    day: z.string()
+        .transform(str => parseInt(str))
+        .pipe(z.number().int().min(1)),
+    id: uid
+}).refine(({ year, month, day }) => day <= ICALmodule.Time.daysInMonth(month, year));
+
+const rfc2822 = new Intl.DateTimeFormat('en', {
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    timeZoneName: 'short'
+});
+const toRfc2822 = (date) => {
+    const parts = Object.fromEntries(rfc2822.formatToParts(date)
+        .filter(it => it.type !== 'literal')
+        .map(it => [it.type, it.value]));
+    return `${parts.weekday}, ${parts.day} ${parts.month} ${parts.year} ${parts.hour}:${parts.minute}:${parts.second} ${parts.timeZoneName}`;
+};
 const app = express();
-app.disable('x-powered-by');
-app.use('/', (req, res) => {
-    res.end('Hello world');
-});
 const dataHandler = new DataHandler();
-void dataHandler.fetch().finally(() => {
-    console.log(dataHandler.getDay(2024, 11, 7).toJson(), 'done');
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+    res.setHeader('X-API-Version', 2);
+    next();
 });
-// app.listen(env.PORT, () => {
-//   console.log(`Server listening at http://[::1]:${env.PORT}`)
-// })
+app.get('/', (req, res) => {
+    res
+        .status(200)
+        .setHeader('Location', 'https://http.cat/204')
+        .setHeader('Content-Type', 'text/plain; charset=utf-8')
+        .send('"It\'s more fun to be a pirate than to join the navy."\n\t– Steve Jobs\n')
+        .end();
+});
+app.get('/:year/:month', (req, res) => {
+    const params = v1Month.safeParse(req.params);
+    if (!params.success) {
+        return sendZodError(res, params.error);
+    }
+    res.header('Last-Modified', toRfc2822(dataHandler.lastUpdate));
+    if (req.headers['if-modified-since'] != null && new Date(req.headers['if-modified-since']) < dataHandler.lastUpdate) {
+        res
+            .status(304)
+            .header('Content-Type', 'text/plain; charset=utf-8')
+            .end();
+        return;
+    }
+    res.header('Content-Type', 'application/json; charset=utf-8').json(dataHandler.getMonth(params.data.year, params.data.month).toPlainObject()).end();
+});
+app.get('/:year/:month/:day', (req, res) => {
+    const params = v1Day.safeParse(req.params);
+    if (!params.success) {
+        return sendZodError(res, params.error);
+    }
+    if (req.headers['if-modified-since'] != null && new Date(req.headers['if-modified-since']) < dataHandler.lastUpdate) {
+        res
+            .status(304)
+            .header('Last-Modified', toRfc2822(dataHandler.lastUpdate))
+            .header('Content-Type', 'text/plain; charset=utf-8')
+            .end();
+        return;
+    }
+    res.header('Content-Type', 'application/json; charset=utf-8').json(dataHandler.getDay(params.data.year, params.data.month, params.data.day));
+});
+app.get('/id/:id', (req, res) => {
+    res.status(501).end();
+});
+app.get('/id/:year/:id', (req, res) => {
+    res.status(501).end();
+});
+app.get('/id/:year/:month/:id', (req, res) => {
+    res.status(501).end();
+});
+app.get('/id/:year/:month/:day/:id', (req, res) => {
+    res.status(501).end();
+});
+app.listen(env.PORT, () => {
+    console.log(`Server listening at http://[::1]:${env.PORT}`);
+});
 //# sourceMappingURL=app.js.map
