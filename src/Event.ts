@@ -29,14 +29,14 @@ export default class Event implements ReturnedByApi<EventJsonable> {
     this.title = event.summary
     this.description = event.description
     this.location = event.location
-    this.start = event.startDate
-    this.end = event.endDate
+    this.start = event.startDate.clone()
+    this.end = event.endDate.clone()
   }
 
   static createWithDiff (icalEvent: ICAL.Event, relativeTo: ICAL.Time): Event {
     const event = new Event(icalEvent)
 
-    let a = relativeTo
+    let a = relativeTo.clone()
     let b = icalEvent.startDate
 
     if (a.isDate && !b.isDate) {
