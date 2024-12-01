@@ -48213,7 +48213,8 @@ dotenv.config();
 const envSchema = z.object({
     PORT: z.string()
         .transform(port => Number.parseInt(port)).pipe(z.number().int().min(0).max(65535)),
-    ICAL_URL: z.string().url()
+    ICAL_URL: z.string().url(),
+    HOST: z.string().optional()
 }).passthrough();
 var env = envSchema.parse(process.env);
 
@@ -57790,6 +57791,30 @@ class Event {
     }
 }
 
+class EventInDay {
+    #day;
+    get year() {
+        return this.#day.year;
+    }
+    get month() {
+        return this.#day.month;
+    }
+    get day() {
+        return this.#day.day;
+    }
+    events;
+    get empty() {
+        return this.events.length === 0;
+    }
+    constructor(day, id) {
+        this.#day = day;
+        this.events = day.events.filter(event => event.id === id);
+    }
+    toPlainObject() {
+        return Day.prototype.toPlainObject.call(this);
+    }
+}
+
 class Day {
     year;
     month;
@@ -57807,6 +57832,9 @@ class Day {
             return start <= this.#asInt && end >= this.#asInt;
         });
     }
+    getId(id) {
+        return new EventInDay(this, id);
+    }
     toPlainObject() {
         return {
             year: this.year,
@@ -57814,9 +57842,6 @@ class Day {
             day: this.day,
             events: this.events.map(event => event.toPlainObject())
         };
-    }
-    toJson(space) {
-        return JSON.stringify(this.toPlainObject(), null, space);
     }
 }
 
@@ -57834,15 +57859,72 @@ function sendProblem(res, problem) {
         .setHeader('Content-Type', 'application/problem+json; charset=utf-8')
         .json(problem);
 }
-function sendZodError(res, error) {
-    const [detail] = Object.values(error.flatten())
+function sendZodError(req, res, error) {
+    const [detail] = Object.values(error.flatten().fieldErrors)
         .flat()
         .filter(it => it != null && typeof it === 'string');
     sendProblem(res, {
         status: 400,
-        title: error.message,
-        detail
+        title: 'Invalid argument',
+        detail,
+        instance: `${req.host}${req.path}`
     });
+}
+function getWeekNumber(date) {
+    const d = date != null ? new Date(date) : new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + 4 - (d.getDay() > 0 ? d.getDay() : 7));
+    const yearStart = new Date(d.getFullYear(), 0, 1);
+    const weekNo = Math.ceil((((d.getTime() - yearStart.getTime()) / 86_400_000) + 1) / 7);
+    return [weekNo, d.getFullYear()];
+}
+function weeksInYear(year) {
+    const d = new Date(year, 11, 31);
+    const [week] = getWeekNumber(d);
+    return week === 1 ? 52 : 53;
+}
+const enOrdinalRules = new Intl.PluralRules('en', { type: 'ordinal' });
+const suffixes = new Map([
+    ['one', 'st'],
+    ['two', 'nd'],
+    ['few', 'rd'],
+    ['other', 'th']
+]);
+const formatOrdinals = (n) => {
+    const rule = enOrdinalRules.select(n);
+    const suffix = suffixes.get(rule) ?? '';
+    return `${n}${suffix}`;
+};
+
+class EventInMonth {
+    #month;
+    events;
+    get year() {
+        return this.#month.year;
+    }
+    get month() {
+        return this.#month.month;
+    }
+    get start() {
+        return this.#month.start;
+    }
+    get end() {
+        return this.#month.end;
+    }
+    days = new Map();
+    get empty() {
+        return this.events.length === 0;
+    }
+    constructor(month, id) {
+        this.#month = month;
+        this.events = month.events.filter(event => event.id === id);
+    }
+    getDay(day) {
+        return Month.prototype.getDay.call(this, day);
+    }
+    toPlainObject() {
+        return Month.prototype.toPlainObject.call(this);
+    }
 }
 
 // @ts-expect-error
@@ -57850,34 +57932,24 @@ class Month {
     events;
     year;
     month;
-    firstWeekMonday;
-    lastWeekExtSunday;
+    start;
+    end;
     days = new Map();
-    constructor(year, month, data) {
+    constructor(year, month, dataHandler) {
         this.year = year;
         this.month = month;
-        this.firstWeekMonday = new ICALmodule.Time({
+        this.start = new ICALmodule.Time({
             year,
             month,
             day: 1,
             isDate: true
-        }, data.timezone).startOfWeek(ICALmodule.Time.MONDAY);
-        this.lastWeekExtSunday = this.firstWeekMonday.clone().adjust(41, 0, 0, 0);
-        this.events = Array.from(Month.#retrieveSingleEvents(year, month, data));
-        for (let idx = 0, recurringEvent = data.recurringEvents[0]; idx < data.recurringEvents.length; recurringEvent = data.recurringEvents[++idx]) {
+        }, dataHandler.timezone).startOfWeek(ICALmodule.Time.MONDAY);
+        this.end = this.start.clone().adjust(41, 0, 0, 0);
+        this.events = Array.from(Month.#retrieveSingleEvents(year, month, dataHandler));
+        for (let idx = 0, recurringEvent = dataHandler.recurringEvents[0]; idx < dataHandler.recurringEvents.length; recurringEvent = dataHandler.recurringEvents[++idx]) {
             this.events.push(...recurringEvent(this));
         }
         Object.freeze(this.events);
-    }
-    static *#retrieveSingleEvents(year, month, data) {
-        const asInt = year * 100 + month;
-        for (let idx = 0, event = data.events[0]; idx < data.events.length; event = data.events[++idx]) {
-            const start = event.start.year * 100 + event.start.month;
-            const end = event.end.year * 100 + event.end.month;
-            if (start <= asInt && end >= asInt) {
-                yield event;
-            }
-        }
     }
     getDay(day) {
         return mapGetOrSet(this.days, day, () => new Day(this, day));
@@ -57886,6 +57958,69 @@ class Month {
         return {
             year: this.year,
             month: this.month,
+            events: this.events.map(event => event.toPlainObject())
+        };
+    }
+    getId(id) {
+        return new EventInMonth(this, id);
+    }
+    static *#retrieveSingleEvents(year, month, dataHandler) {
+        const asInt = year * 100 + month;
+        for (let idx = 0, event = dataHandler.events[0]; idx < dataHandler.events.length; event = dataHandler.events[++idx]) {
+            const start = event.start.year * 100 + event.start.month;
+            const end = event.end.year * 100 + event.end.month;
+            if (start <= asInt && end >= asInt) {
+                yield event;
+            }
+        }
+    }
+}
+
+// @ts-expect-error
+class Week {
+    events;
+    year;
+    week;
+    start;
+    end;
+    constructor(year, week, data) {
+        this.year = year;
+        this.week = week;
+        this.start = Week.getMondayOfWeek(year, week, data.timezone);
+        this.end = this.start.endOfWeek(ICALmodule.Time.MONDAY);
+        this.events = Array.from(Week.#retrieveSingleEvents(year, week, data));
+        for (let idx = 0, recurringEvent = data.recurringEvents[0]; idx < data.recurringEvents.length; recurringEvent = data.recurringEvents[++idx]) {
+            this.events.push(...recurringEvent(this));
+        }
+        Object.freeze(this.events);
+    }
+    static getMondayOfWeek(year, week, timezone) {
+        const time = new ICALmodule.Time({
+            year,
+            month: 1,
+            day: 4, // January fourth is always in the specified year
+            isDate: true
+        }, timezone);
+        const diff = time.weekNumber(ICALmodule.Time.MONDAY) - week;
+        time.adjust(diff * 7, 0, 0, 0);
+        return time.startOfWeek(ICALmodule.Time.MONDAY);
+    }
+    static *#retrieveSingleEvents(year, week, data) {
+        const asInt = year * 100 + week;
+        for (let idx = 0, event = data.events[0]; idx < data.events.length; event = data.events[++idx]) {
+            const startWeek = getWeekNumber(event.start.toJSDate());
+            const endWeek = getWeekNumber(event.end.toJSDate());
+            const start = startWeek[0] + startWeek[1] * 100;
+            const end = endWeek[0] + endWeek[1] * 100;
+            if (start <= asInt && end >= asInt) {
+                yield event;
+            }
+        }
+    }
+    toPlainObject() {
+        return {
+            year: this.year,
+            week: this.week,
             events: this.events.map(event => event.toPlainObject())
         };
     }
@@ -57898,6 +58033,7 @@ class DataHandler {
     #lastUpdate = new Date(0);
     #iterator = null;
     months = new Map();
+    weeks = new Map();
     eventMap = new Map();
     static #instance = null;
     constructor(timezone) {
@@ -57955,10 +58091,11 @@ class DataHandler {
             }
             else {
                 function* recurringEvent(month) {
-                    const iterator = event.iterator(month.firstWeekMonday);
+                    const iterator = event.iterator(month.start);
                     let val = iterator.next();
-                    while (!iterator.complete && month.lastWeekExtSunday.compareDateOnlyTz(val, this.timezone) >= 0) {
+                    while (!iterator.complete && month.end.compareDateOnlyTz(val, this.timezone) >= 0) {
                         if (val.compareDateOnlyTz(event.startDate, this.timezone) === -1) {
+                            val = iterator.next();
                             continue;
                         }
                         yield Event.createWithDiff(event, val);
@@ -57977,57 +58114,105 @@ class DataHandler {
         }, 600000);
     }
     getMonth(year, month) {
-        console.log('hey');
         const yearMap = mapGetOrSet(this.months, year, () => new Map());
-        console.log(yearMap);
         return mapGetOrSet(yearMap, month, () => new Month(year, month, this));
     }
     getDay(year, month, day) {
         return this.getMonth(year, month).getDay(day);
     }
+    getWeek(year, week) {
+        const yearMap = mapGetOrSet(this.weeks, year, () => new Map());
+        return mapGetOrSet(yearMap, week, () => new Week(year, week, this));
+    }
 }
 
-const uid = z.string().uuid();
+const monthFormatter = new Intl.DateTimeFormat('en', { month: 'long' });
+const getMonthName = (month) => monthFormatter.format(new Date(`2024-${month}-01`));
 const year = z.string()
+    .regex(/^\d+$/, 'The year must be a valid integer')
     .transform(str => parseInt(str))
-    .pipe(z.number().int().min(1970).max(2100));
+    .pipe(z.number()
+    .int('The year must be a valid integer')
+    .min(1970, 'The minimum year is 1970')
+    .max(2100, 'The maximum year is 2100'));
 const month = z.string()
+    .regex(/^\d+$/, 'The month must be a valid integer')
     .transform(str => parseInt(str))
-    .pipe(z.number().int().min(1).max(12))
+    .pipe(z.number()
+    .int('The month must be a valid integer')
+    .min(1, 'The minimum month is 1 (= January)')
+    .max(12, 'The maximum month is 12 (= December)'))
     .transform(it => it);
-// --- v1 ------
-const v1Month = z.object({
-    year,
-    month
-});
-const v1Day = z.object({
-    year,
-    month,
-    day: z.string()
+const schema2Params = z.union([
+    z.object({
+        param0: year,
+        param1: month
+    })
+        .transform(({ param0, param1 }) => ({
+        year: param0,
+        month: param1
+    })),
+    z.object({
+        param0: year,
+        param1: z.string()
+            .regex(/^w\d{1,2}$/)
+            .transform(w => parseInt(w.slice(1)))
+            .pipe(z.number()
+            .int('Week must be a valid integer')
+            .min(1, 'The minimum week is 1'))
+    })
+        .refine(({ param0, param1 }) => param1 <= weeksInYear(param0), ({ param0 }) => ({ message: `The maximum week of yeara ${param0} is ${weeksInYear(param0)}` }))
+        .transform(({ param0, param1 }) => ({
+        year: param0,
+        week: param1
+    }))
+]);
+const schema3Params = z.union([
+    z.object({
+        param0: year,
+        param1: month,
+        param2: z.string().uuid('The id of an event must be a valid UUIDv4')
+    })
+        .transform(({ param0, param1, param2 }) => ({
+        year: param0,
+        month: param1,
+        id: param2
+    })),
+    z.object({
+        param0: year,
+        param1: month,
+        param2: z.string()
+            .regex(/^\d+$/, 'The day must be a valid integer')
+            .transform(str => parseInt(str))
+            .pipe(z.number()
+            .int('The day must be a valid integer')
+            .min(1, 'The minimum day is 1'))
+    })
+        .refine(({ param0, param1, param2 }) => param2 <= ICALmodule.Time.daysInMonth(param1, param0), ({ param0, param1 }) => ({ message: `The maximum day in ${getMonthName(param1)} of ${param0} is ${ICALmodule.Time.daysInMonth(param1, param0)}` }))
+        .transform(({ param0, param1, param2 }) => ({
+        year: param0,
+        month: param1,
+        day: param2
+    }))
+]);
+const schema4Params = z.object({
+    param0: year,
+    param1: month,
+    param2: z.string()
+        .regex(/^\d+$/, 'The day must be a valid integer')
         .transform(str => parseInt(str))
-        .pipe(z.number().int().min(1))
-}).refine(({ year, month, day }) => day <= ICALmodule.Time.daysInMonth(month, year));
-// --- v2 ------
-z.object({
-    id: uid
-});
-z.object({
-    year,
-    id: uid
-});
-z.object({
-    year,
-    month,
-    id: uid
-});
-z.object({
-    year,
-    month,
-    day: z.string()
-        .transform(str => parseInt(str))
-        .pipe(z.number().int().min(1)),
-    id: uid
-}).refine(({ year, month, day }) => day <= ICALmodule.Time.daysInMonth(month, year));
+        .pipe(z.number()
+        .int('The day must be a valid integer')
+        .min(1, 'The minimum day is 1')),
+    param3: z.string().uuid('The id of an event must be a valid UUIDv4')
+})
+    .refine(({ param0, param1, param2 }) => param2 <= ICALmodule.Time.daysInMonth(param1, param0), ({ param0, param1 }) => ({ message: `The maximum day in ${getMonthName(param1)} of ${param0} is ${ICALmodule.Time.daysInMonth(param1, param0)}` }))
+    .transform(({ param0, param1, param2, param3 }) => ({
+    year: param0,
+    month: param1,
+    day: param2,
+    id: param3
+}));
 
 const rfc2822 = new Intl.DateTimeFormat('en', {
     weekday: 'short',
@@ -58045,6 +58230,15 @@ const toRfc2822 = (date) => {
         .map(it => [it.type, it.value]));
     return `${parts.weekday}, ${parts.day} ${parts.month} ${parts.year} ${parts.hour}:${parts.minute}:${parts.second} ${parts.timeZoneName}`;
 };
+const lastModified = (req, res) => {
+    res.header('Last-Modified', toRfc2822(dataHandler.lastUpdate));
+    if (req.headers['if-modified-since'] != null && new Date(req.headers['if-modified-since']) > dataHandler.lastUpdate) {
+        res.status(304).end();
+        return true;
+    }
+    return false;
+};
+const setContentType = (res, subtype) => res.header('Content-Type', `application/x.piraten-rek.de.calendar.${subtype}+json; charset=utf-8`);
 const app = express();
 const dataHandler = new DataHandler();
 app.disable('x-powered-by');
@@ -58055,52 +58249,69 @@ app.use((req, res, next) => {
 app.get('/', (req, res) => {
     res
         .status(200)
-        .setHeader('Location', 'https://http.cat/204')
         .setHeader('Content-Type', 'text/plain; charset=utf-8')
         .send('"It\'s more fun to be a pirate than to join the navy."\n\t– Steve Jobs\n')
         .end();
 });
-app.get('/:year/:month', (req, res) => {
-    const params = v1Month.safeParse(req.params);
+app.get('/:param0', (req, res) => sendProblem(res, {
+    status: 400,
+    title: 'You need to specify month or week of year',
+    detail: 'You need to at least specify a month or a week of year to retrieve'
+}));
+app.get('/:param0/:param1', (req, res) => {
+    const params = schema2Params.safeParse(req.params);
     if (!params.success) {
-        return sendZodError(res, params.error);
+        return sendZodError(req, res, params.error);
     }
-    res.header('Last-Modified', toRfc2822(dataHandler.lastUpdate));
-    if (req.headers['if-modified-since'] != null && new Date(req.headers['if-modified-since']) < dataHandler.lastUpdate) {
-        res
-            .status(304)
-            .header('Content-Type', 'text/plain; charset=utf-8')
-            .end();
+    if (lastModified(req, res))
+        return;
+    if ('month' in params.data) {
+        setContentType(res, 'month').json(dataHandler.getMonth(params.data.year, params.data.month).toPlainObject());
         return;
     }
-    res.header('Content-Type', 'application/json; charset=utf-8').json(dataHandler.getMonth(params.data.year, params.data.month).toPlainObject()).end();
+    setContentType(res, 'week-of-year').json(dataHandler.getWeek(params.data.year, params.data.week).toPlainObject());
 });
-app.get('/:year/:month/:day', (req, res) => {
-    const params = v1Day.safeParse(req.params);
+app.get('/:param0/:param1/:param2', (req, res) => {
+    const params = schema3Params.safeParse(req.params);
     if (!params.success) {
-        return sendZodError(res, params.error);
+        return sendZodError(req, res, params.error);
     }
-    if (req.headers['if-modified-since'] != null && new Date(req.headers['if-modified-since']) < dataHandler.lastUpdate) {
-        res
-            .status(304)
-            .header('Last-Modified', toRfc2822(dataHandler.lastUpdate))
-            .header('Content-Type', 'text/plain; charset=utf-8')
-            .end();
+    if (lastModified(req, res))
+        return;
+    if ('day' in params.data) {
+        setContentType(res, 'day').json(dataHandler.getDay(params.data.year, params.data.month, params.data.day).toPlainObject());
         return;
     }
-    res.header('Content-Type', 'application/json; charset=utf-8').json(dataHandler.getDay(params.data.year, params.data.month, params.data.day));
+    const events = dataHandler.getMonth(params.data.year, params.data.month)
+        .getId(params.data.id);
+    if (events.empty) {
+        return sendProblem(res, {
+            status: 404,
+            title: 'Specified event could not be found',
+            detail: `The event with id "${params.data.id}" could not be found in ${getMonthName(params.data.month)} of ${params.data.year}.`,
+            instance: `${req.host}${req.path}`
+        });
+    }
+    setContentType(res, 'event').json(events.toPlainObject());
 });
-app.get('/id/:id', (req, res) => {
-    res.status(501).end();
-});
-app.get('/id/:year/:id', (req, res) => {
-    res.status(501).end();
-});
-app.get('/id/:year/:month/:id', (req, res) => {
-    res.status(501).end();
-});
-app.get('/id/:year/:month/:day/:id', (req, res) => {
-    res.status(501).end();
+app.get('/:param0/:param1/:param2/:param3', (req, res) => {
+    const params = schema4Params.safeParse(req.params);
+    if (!params.success) {
+        return sendZodError(req, res, params.error);
+    }
+    if (lastModified(req, res))
+        return;
+    const { data } = params;
+    const events = dataHandler.getDay(data.year, data.month, data.day).getId(data.id);
+    if (events.empty) {
+        return sendProblem(res, {
+            status: 404,
+            title: 'Specified event could not be found',
+            detail: `The event with id "${params.data.id}" could not be found in the ${formatOrdinals(params.data.day)} of ${getMonthName(params.data.month)}, ${params.data.year}.`,
+            instance: `${req.host}${req.path}`
+        });
+    }
+    setContentType(res, 'event').json(events.toPlainObject());
 });
 app.listen(env.PORT, () => {
     console.log(`Server listening at http://[::1]:${env.PORT}`);

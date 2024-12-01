@@ -1,15 +1,11 @@
-import type Month from './Month'
-import type { MonthInt, ReturnedByApi } from './types'
+import type BaseDay from './BaseDay'
+import type { DayJsonable } from './BaseDay'
 import type Event from './Event'
+import EventInDay from './EventInDay'
+import type Month from './Month'
+import type { MonthInt } from './types'
 
-export interface DayJsonable {
-  year: number
-  month: MonthInt
-  day: number
-  events: Array<ReturnType<Event['toPlainObject']>>
-}
-
-export default class Day implements ReturnedByApi<DayJsonable> {
+export default class Day implements BaseDay {
   readonly year: number
   readonly month: MonthInt
   readonly day: number
@@ -31,6 +27,10 @@ export default class Day implements ReturnedByApi<DayJsonable> {
     })
   }
 
+  getId (id: string): EventInDay {
+    return new EventInDay(this, id)
+  }
+
   toPlainObject (): DayJsonable {
     return {
       year: this.year,
@@ -38,9 +38,5 @@ export default class Day implements ReturnedByApi<DayJsonable> {
       day: this.day,
       events: this.events.map(event => event.toPlainObject())
     }
-  }
-
-  toJson (space?: string | number): string {
-    return JSON.stringify(this.toPlainObject(), null, space)
   }
 }

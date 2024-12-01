@@ -1,8 +1,8 @@
 import express from 'express'
 import DataHandler from './DataHandler.js'
-import { v1Day, v1Month } from './schema.js'
+import { getMonthName, schema2Params, schema3Params, schema4Params } from './schema.js'
 import env from './env.js'
-import { sendZodError } from './helpers.js'
+import { formatOrdinals, sendProblem, sendZodError } from './helpers.js'
 
 const rfc2822 = new Intl.DateTimeFormat('en', {
   weekday: 'short',
@@ -23,6 +23,20 @@ const toRfc2822 = (date: Date): string => {
   return `${parts.weekday}, ${parts.day} ${parts.month} ${parts.year} ${parts.hour}:${parts.minute}:${parts.second} ${parts.timeZoneName}`
 }
 
+const lastModified = (req: express.Request, res: express.Response): boolean => {
+  res.header('Last-Modified', toRfc2822(dataHandler.lastUpdate))
+
+  if (req.headers['if-modified-since'] != null && new Date(req.headers['if-modified-since']) > dataHandler.lastUpdate) {
+    res.status(304).end()
+    return true
+  }
+
+  return false
+}
+
+const setContentType = (res: express.Response, subtype: string): express.Response =>
+  res.header('Content-Type', `application/x.piraten-rek.de.calendar.${subtype}+json; charset=utf-8`)
+
 const app = express()
 const dataHandler = new DataHandler()
 
@@ -36,69 +50,96 @@ app.use((req, res, next) => {
 app.get('/', (req, res) => {
   res
     .status(200)
-    .setHeader('Location', 'https://http.cat/204')
     .setHeader('Content-Type', 'text/plain; charset=utf-8')
     .send('"It\'s more fun to be a pirate than to join the navy."\n\t– Steve Jobs\n')
     .end()
 })
 
-app.get('/:year/:month', (req, res) => {
-  const params = v1Month.safeParse(req.params)
+app.get('/:param0', (req, res) => sendProblem(res, {
+  status: 400,
+  title: 'You need to specify month or week of year',
+  detail: 'You need to at least specify a month or a week of year to retrieve'
+}))
+
+app.get('/:param0/:param1', (req, res) => {
+  const params = schema2Params.safeParse(req.params)
 
   if (!params.success) {
-    return sendZodError(res, params.error)
+    return sendZodError(req, res, params.error)
   }
 
-  res.header('Last-Modified', toRfc2822(dataHandler.lastUpdate))
+  if (lastModified(req, res)) return
 
-  if (req.headers['if-modified-since'] != null && new Date(req.headers['if-modified-since']) < dataHandler.lastUpdate) {
-    res
-      .status(304)
-      .header('Content-Type', 'text/plain; charset=utf-8')
-      .end()
+  if ('month' in params.data) {
+    setContentType(res, 'month').json(
+      dataHandler.getMonth(params.data.year, params.data.month).toPlainObject()
+    )
     return
   }
 
-  res.header('Content-Type', 'application/json; charset=utf-8').json(
-    dataHandler.getMonth(params.data.year, params.data.month).toPlainObject()
-  ).end()
-})
-
-app.get('/:year/:month/:day', (req, res) => {
-  const params = v1Day.safeParse(req.params)
-
-  if (!params.success) {
-    return sendZodError(res, params.error)
-  }
-
-  if (req.headers['if-modified-since'] != null && new Date(req.headers['if-modified-since']) < dataHandler.lastUpdate) {
-    res
-      .status(304)
-      .header('Last-Modified', toRfc2822(dataHandler.lastUpdate))
-      .header('Content-Type', 'text/plain; charset=utf-8')
-      .end()
-    return
-  }
-
-  res.header('Content-Type', 'application/json; charset=utf-8').json(
-    dataHandler.getDay(params.data.year, params.data.month, params.data.day)
+  setContentType(res, 'week-of-year').json(
+    dataHandler.getWeek(params.data.year, params.data.week).toPlainObject()
   )
 })
 
-app.get('/id/:id', (req, res) => {
-  res.status(501).end()
+app.get('/:param0/:param1/:param2', (req, res) => {
+  const params = schema3Params.safeParse(req.params)
+
+  if (!params.success) {
+    return sendZodError(req, res, params.error)
+  }
+
+  if (lastModified(req, res)) return
+
+  if ('day' in params.data) {
+    setContentType(res, 'day').json(
+      dataHandler.getDay(params.data.year, params.data.month, params.data.day).toPlainObject()
+    )
+    return
+  }
+
+  const events = dataHandler.getMonth(params.data.year, params.data.month)
+    .getId(params.data.id)
+
+  if (events.empty) {
+    return sendProblem(res, {
+      status: 404,
+      title: 'Specified event could not be found',
+      detail: `The event with id "${params.data.id}" could not be found in ${getMonthName(params.data.month)} of ${params.data.year}.`,
+      instance: `${req.host}${req.path}`
+    })
+  }
+
+  setContentType(res, 'event').json(
+    events.toPlainObject()
+  )
 })
 
-app.get('/id/:year/:id', (req, res) => {
-  res.status(501).end()
-})
+app.get('/:param0/:param1/:param2/:param3', (req, res) => {
+  const params = schema4Params.safeParse(req.params)
 
-app.get('/id/:year/:month/:id', (req, res) => {
-  res.status(501).end()
-})
+  if (!params.success) {
+    return sendZodError(req, res, params.error)
+  }
 
-app.get('/id/:year/:month/:day/:id', (req, res) => {
-  res.status(501).end()
+  if (lastModified(req, res)) return
+
+  const { data } = params
+
+  const events = dataHandler.getDay(data.year, data.month, data.day).getId(data.id)
+
+  if (events.empty) {
+    return sendProblem(res, {
+      status: 404,
+      title: 'Specified event could not be found',
+      detail: `The event with id "${params.data.id}" could not be found in the ${formatOrdinals(params.data.day)} of ${getMonthName(params.data.month)}, ${params.data.year}.`,
+      instance: `${req.host}${req.path}`
+    })
+  }
+
+  setContentType(res, 'event').json(
+    events.toPlainObject()
+  )
 })
 
 app.listen(env.PORT, () => {

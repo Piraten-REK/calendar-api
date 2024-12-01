@@ -2,8 +2,9 @@ import env from './env.js'
 // @ts-expect-error
 import ICAL from 'ical.js'
 import Event from './Event.js'
-import type { RecurringEvent, Month as IMonth, MonthInt } from './types.js'
+import type { RecurringEvent, RecurringDataArguments, MonthInt } from './types.js'
 import Month from './Month.js'
+import Week from './Week.js'
 import { mapGetOrSet } from './helpers.js'
 import type Day from './Day.js'
 
@@ -14,6 +15,7 @@ export default class DataHandler {
   #lastUpdate: Date = new Date(0)
   #iterator: NodeJS.Timeout | null = null
   months = new Map<number, Map<MonthInt, Month>>()
+  weeks = new Map<number, Map<number, Week>>()
   eventMap = new Map<string, Event[]>()
 
   static #instance: DataHandler | null = null
@@ -83,12 +85,13 @@ export default class DataHandler {
           new Event(event)
         )
       } else {
-        function * recurringEvent (this: DataHandler, month: IMonth): Generator<Event> {
-          const iterator = event.iterator(month.firstWeekMonday)
+        function * recurringEvent (this: DataHandler, month: RecurringDataArguments): Generator<Event> {
+          const iterator = event.iterator(month.start)
 
           let val = iterator.next()
-          while (!iterator.complete && month.lastWeekExtSunday.compareDateOnlyTz(val as any, this.timezone as ICAL.Timezone) >= 0) {
+          while (!iterator.complete && month.end.compareDateOnlyTz(val as any, this.timezone as ICAL.Timezone) >= 0) {
             if (val.compareDateOnlyTz(event.startDate as any, this.timezone as ICAL.Timezone) === -1) {
+              val = iterator.next()
               continue
             }
 
@@ -97,7 +100,10 @@ export default class DataHandler {
             val = iterator.next()
           }
         }
-        recurringEvents.push(recurringEvent.bind(this))
+
+        recurringEvents.push(
+          recurringEvent.bind(this) as RecurringEvent
+        )
       }
     }
 
@@ -112,9 +118,7 @@ export default class DataHandler {
   }
 
   getMonth (year: number, month: MonthInt): Month {
-    console.log('hey')
     const yearMap = mapGetOrSet(this.months, year, () => new Map<MonthInt, Month>())
-    console.log(yearMap)
     return mapGetOrSet(
       yearMap,
       month,
@@ -124,5 +128,14 @@ export default class DataHandler {
 
   getDay (year: number, month: MonthInt, day: number): Day {
     return this.getMonth(year, month).getDay(day)
+  }
+
+  getWeek (year: number, week: number): Week {
+    const yearMap = mapGetOrSet(this.weeks, year, () => new Map<number, Week>())
+    return mapGetOrSet(
+      yearMap,
+      week,
+      () => new Week(year, week, this)
+    )
   }
 }
