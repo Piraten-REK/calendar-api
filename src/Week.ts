@@ -26,9 +26,6 @@ export default class Week implements RecurringDataArguments, ReturnedByApi<WeekJ
     this.end = this.start.endOfWeek(ICAL.Time.MONDAY)
 
     this.events = Array.from(Week.#retrieveSingleEvents(year, week, data))
-    for (let idx = 0, recurringEvent = data.recurringEvents[0]; idx < data.recurringEvents.length; recurringEvent = data.recurringEvents[++idx]) {
-      this.events.push(...recurringEvent(this))
-    }
 
     Object.freeze(this.events)
   }

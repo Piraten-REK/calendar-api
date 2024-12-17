@@ -3,6 +3,7 @@ import { z } from 'zod'
 import ICAL from 'ical.js'
 import { MonthInt } from './types'
 import { weeksInYear } from './helpers'
+import { START_YEAR, END_YEAR_OFFSET } from './config'
 
 const monthFormatter = new Intl.DateTimeFormat('en', { month: 'long' })
 export const getMonthName = (month: MonthInt): string => monthFormatter.format(new Date(`2024-${month}-01`))
@@ -13,8 +14,8 @@ const year = z.string()
   .pipe(
     z.number()
       .int('The year must be a valid integer')
-      .min(1970, 'The minimum year is 1970')
-      .max(2100, 'The maximum year is 2100')
+      .min(START_YEAR, `The minimum year is ${START_YEAR}`)
+      .max(new Date().getFullYear() + END_YEAR_OFFSET, `The maximum year is ${new Date().getFullYear() + END_YEAR_OFFSET}`)
   )
 
 const month = z.string()

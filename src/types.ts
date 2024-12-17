@@ -24,3 +24,17 @@ export type ProblemObj <Additional extends Record<string, unknown> = {}> = {
   detail?: string
   instance?: string
 } & Additional
+
+export interface CurrentEventsJsonable {
+  readonly events: Array<ReturnType<Event['toPlainObject']>>
+  readonly date: string
+  readonly max: number
+}
+
+export interface CurrentEvents extends ReturnedByApi<CurrentEventsJsonable> {
+  events: Event[]
+  date: Date
+  max: number
+
+  toPlainObject: () => CurrentEventsJsonable
+}

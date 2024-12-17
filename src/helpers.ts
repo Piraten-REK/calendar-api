@@ -16,7 +16,8 @@ export function mapGetOrSet <K, V> (map: Map<K, V>, key: K, setter: (() => V)): 
 export function sendProblem (res: Response, problem: ProblemObj): void {
   res
     .status(problem.status)
-    .setHeader('Content-Type', 'application/problem+json; charset=utf-8')
+    .header('Content-Type', 'application/problem+json; charset=utf-8')
+    .header('Cache-Control', 'no-store')
     .json(problem)
 }
 
@@ -29,8 +30,24 @@ export function sendZodError (req: Request, res: Response, error: ZodError): voi
     status: 400,
     title: 'Invalid argument',
     detail,
-    instance: `${req.host}${req.path}`
+    instance: `//${req.hostname}${req.path}`
   })
+}
+
+export const errorHandler = (req: Request, res: Response, err: unknown): void => {
+  const problem: ProblemObj = {
+    status: 500,
+    title: 'Internal Server Error',
+    instance: '//' + req.hostname + req.url
+  }
+
+  if (err instanceof Error && err.stack != null && err.stack.length > 0) {
+    problem.detail = err.stack
+  } else if (typeof err === 'string' && err.length > 0) {
+    problem.detail = err
+  }
+
+  return sendProblem(res, problem)
 }
 
 export function getWeekNumber (date?: Date): [number, number] {

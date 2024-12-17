@@ -30,9 +30,6 @@ export default class Month implements BaseMonth {
     this.end = this.start.clone().adjust(41, 0, 0, 0)
 
     this.events = Array.from(Month.#retrieveSingleEvents(year, month, dataHandler))
-    for (let idx = 0, recurringEvent = dataHandler.recurringEvents[0]; idx < dataHandler.recurringEvents.length; recurringEvent = dataHandler.recurringEvents[++idx]) {
-      this.events.push(...recurringEvent(this))
-    }
 
     Object.freeze(this.events)
   }

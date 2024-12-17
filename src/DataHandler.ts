@@ -2,21 +2,22 @@ import env from './env.js'
 // @ts-expect-error
 import ICAL from 'ical.js'
 import Event from './Event.js'
-import type { RecurringEvent, RecurringDataArguments, MonthInt } from './types.js'
+import type { MonthInt, CurrentEvents, CurrentEventsJsonable } from './types.js'
 import Month from './Month.js'
 import Week from './Week.js'
 import { mapGetOrSet } from './helpers.js'
 import type Day from './Day.js'
+import { START_YEAR, END_YEAR_OFFSET, MAX_NEXT } from './config'
 
 export default class DataHandler {
   timezone: ICAL.Timezone | null = null
   events: Event[] = []
-  recurringEvents: RecurringEvent[] = []
   #lastUpdate: Date = new Date(0)
   #iterator: NodeJS.Timeout | null = null
   months = new Map<number, Map<MonthInt, Month>>()
   weeks = new Map<number, Map<number, Week>>()
   eventMap = new Map<string, Event[]>()
+  nextEvents: Pick<CurrentEvents, 'events' | 'date'> | null = null
 
   static #instance: DataHandler | null = null
 
@@ -74,43 +75,43 @@ export default class DataHandler {
       this.#iterator = null
     }
 
-    const [events, timezone] = await this.#getEvents()
+    const [icalEvents, timezone] = await this.#getEvents()
 
-    const singleEvents: Event[] = []
-    const recurringEvents: RecurringEvent[] = []
+    const start = new ICAL.Time({ year: START_YEAR, month: 1, day: 1, isDate: true }, timezone)
+    const end = new ICAL.Time({
+      year: new Date().getFullYear() + END_YEAR_OFFSET,
+      month: 12,
+      day: 31,
+      isDate: true
+    }, timezone)
 
-    for (let idx = 0, event = events[0]; idx < events.length; event = events[++idx]) {
+    const events: Event[] = []
+
+    for (let idx = 0, event = icalEvents[0]; idx < icalEvents.length; event = icalEvents[++idx]) {
       if (!event.isRecurring()) {
-        singleEvents.push(
+        events.push(
           new Event(event)
         )
       } else {
-        function * recurringEvent (this: DataHandler, month: RecurringDataArguments): Generator<Event> {
-          const iterator = event.iterator(month.start)
+        const iterator = event.iterator(start)
 
-          let val = iterator.next()
-          while (!iterator.complete && month.end.compareDateOnlyTz(val as any, this.timezone as ICAL.Timezone) >= 0) {
-            if (val.compareDateOnlyTz(event.startDate as any, this.timezone as ICAL.Timezone) === -1) {
-              val = iterator.next()
-              continue
-            }
-
-            yield Event.createWithDiff(event, val)
-
+        let val = iterator.next()
+        while (!iterator.complete && end.compareDateOnlyTz(val as any, timezone) >= 0) {
+          if (val.compareDateOnlyTz(event.startDate as any, timezone) === -1) {
             val = iterator.next()
+            continue
           }
-        }
 
-        recurringEvents.push(
-          recurringEvent.bind(this) as RecurringEvent
-        )
+          events.push(Event.createWithDiff(event, val))
+          val = iterator.next()
+        }
       }
     }
 
-    this.events = singleEvents
-    this.recurringEvents = recurringEvents
+    this.events = events
     this.timezone = timezone
     this.#lastUpdate = new Date()
+    this.nextEvents = null
 
     this.#iterator = setTimeout(() => {
       void this.fetch()
@@ -137,5 +138,62 @@ export default class DataHandler {
       week,
       () => new Week(year, week, this)
     )
+  }
+
+  async getNext (n: number): Promise<CurrentEvents> {
+    n = Math.min(n, MAX_NEXT)
+
+    if (this.nextEvents != null) {
+      return {
+        events: this.nextEvents.events.splice(0, Math.min(this.nextEvents.events.length, n)),
+        max: n,
+        date: this.nextEvents.date,
+        toPlainObject (): CurrentEventsJsonable {
+          return {
+            events: this.events.map(event => event.toPlainObject()),
+            date: this.date.toISOString().split('T')[0],
+            max: n
+          }
+        }
+      } satisfies CurrentEvents
+    }
+
+    const now = new Date()
+    const events: Event[] = []
+
+    const asInt = now.getFullYear() * 100 + now.getDate()
+    for (
+      let idx = 0, event = this.events[0];
+      idx < this.events.length;
+      event = this.events[++idx]
+    ) {
+      const start = event.start.year * 100 + event.start.month
+      const end = event.end.year * 100 + event.end.month
+
+      if ((start <= asInt && end >= asInt) || start > asInt) {
+        events.push(event)
+      }
+    }
+
+    this.nextEvents = {
+      events: events
+        .sort((a, b) => a.start.toUnixTime() - b.start.toUnixTime()),
+      date: now
+    }
+
+    return {
+      events: events
+        .sort((a, b) => a.start.toUnixTime() - b.start.toUnixTime())
+        .slice(0, Math.min(events.length, n)),
+      date: now,
+      max: n,
+      toPlainObject (): CurrentEventsJsonable {
+        return {
+          events: this.events.map(event => event.toPlainObject()),
+          date: this.date.toISOString().split('T')[0],
+          max: this.max
+        }
+      }
+    } satisfies CurrentEvents
   }
 }
