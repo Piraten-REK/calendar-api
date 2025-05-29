@@ -141,7 +141,7 @@ export default class DataHandler {
   }
 
   async getNext (n: number): Promise<CurrentEvents> {
-    n = Math.min(Math.max(n, MAX_NEXT), 0)
+    n = Math.min(Math.max(n, 0), MAX_NEXT)
 
     if (this.nextEvents != null) {
       return {
