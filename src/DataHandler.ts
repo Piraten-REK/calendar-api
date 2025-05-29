@@ -141,11 +141,11 @@ export default class DataHandler {
   }
 
   async getNext (n: number): Promise<CurrentEvents> {
-    n = Math.min(n, MAX_NEXT)
+    n = Math.min(Math.max(n, MAX_NEXT), 0)
 
     if (this.nextEvents != null) {
       return {
-        events: this.nextEvents.events.splice(0, Math.min(this.nextEvents.events.length, n)),
+        events: this.nextEvents.events.slice(0, Math.min(this.nextEvents.events.length, n)),
         max: n,
         date: this.nextEvents.date,
         toPlainObject (): CurrentEventsJsonable {
