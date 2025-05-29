@@ -5,7 +5,7 @@ import Event from './Event.js'
 import type { MonthInt, CurrentEvents, CurrentEventsJsonable } from './types.js'
 import Month from './Month.js'
 import Week from './Week.js'
-import { mapGetOrSet } from './helpers.js'
+import { mapGetOrSet, dateAsInt } from './helpers.js'
 import type Day from './Day.js'
 import { START_YEAR, END_YEAR_OFFSET, MAX_NEXT } from './config'
 
@@ -161,14 +161,14 @@ export default class DataHandler {
     const now = new Date()
     const events: Event[] = []
 
-    const asInt = now.getFullYear() * 100 + now.getDate()
+    const asInt = dateAsInt(now)
     for (
       let idx = 0, event = this.events[0];
       idx < this.events.length;
       event = this.events[++idx]
     ) {
-      const start = event.start.year * 100 + event.start.month
-      const end = event.end.year * 100 + event.end.month
+      const start = dateAsInt(event.start)
+      const end = dateAsInt(event.end)
 
       if ((start <= asInt && end >= asInt) || start > asInt) {
         events.push(event)

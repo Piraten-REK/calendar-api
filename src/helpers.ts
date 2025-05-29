@@ -1,3 +1,5 @@
+// @ts-expect-error
+import ICAL from 'ical.js'
 import { Request, Response } from 'express'
 import { ProblemObj } from './types'
 import { ZodError } from 'zod'
@@ -79,3 +81,8 @@ export const formatOrdinals = (n: number): string => {
   const suffix = suffixes.get(rule as any) ?? ''
   return `${n}${suffix}`
 }
+
+export const dateAsInt = (date: Date | ICAL.Time): number =>
+  date instanceof Date
+    ? date.getFullYear() * 10000 + (date.getMonth() + 1) * 100 + date.getDate()
+    : date.year * 10000 + date.month * 100 + (date.day as number)

@@ -68,7 +68,7 @@ app.get('/next', async (req, res, next) => {
 
     const data = await dataHandler.getNext(n)
 
-    setContentType(res, 'event').json(data.toPlainObject())
+    setContentType(res, 'next-events').json(data.toPlainObject())
   } catch (err) {
     errorHandler(req, res, err)
   }
