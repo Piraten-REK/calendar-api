@@ -73,7 +73,7 @@ export default class Event implements ReturnedByApi<EventJsonable> {
       id: this.id,
       title: this.title,
       description: this.description,
-      location: this.description,
+      location: this.location,
       start: this.start.toString(),
       end: this.start.toString(),
       allDay: this.allDay
